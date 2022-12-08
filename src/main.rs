@@ -60,8 +60,10 @@ fn graceful_exit(err: &str) {
 fn compress_file(file: &Path, file_out_name: Option<&Path>) {
     //get the contents of the file as a vector of bytes
     let file_bytes: Vec<u8> = fs::read(file).unwrap();
+
     //print out file_bytes as a formatted(#) debug(?) statement
    // println!("{:#?}", file_bytes);
+
     //the resulting compressed vector
     //first item in tuple is the offset
     //second item in the tuple is the length of the match
@@ -71,16 +73,18 @@ fn compress_file(file: &Path, file_out_name: Option<&Path>) {
     let mut current_pos: usize = 0;
 
     //run until the end of the file
-    while current_pos < file_bytes.len() - 1 {
+    while current_pos < file_bytes.len() - 1{
         //(0, 0, *) is the same as "no match found, here's the next byte"
         let mut current_calculated_tuple: (usize, usize, u8) = (0, 0, file_bytes[current_pos]);
 
         //special handling for the first byte because there's nothing before it to compare against
 
+
         //keep track of the current index byte being compared
         //it's probably far more storage efficient to work backwards from the current_pos
         let mut index_of_byte_to_compare: usize = 0;
         'sub_matches: while index_of_byte_to_compare < current_pos {
+
             //see if we found a matching character
            // println!("Comparing current index {} with compare char {}", index_of_byte_to_compare, current_pos);
             if file_bytes[index_of_byte_to_compare] == file_bytes[current_pos] {
@@ -88,12 +92,15 @@ fn compress_file(file: &Path, file_out_name: Option<&Path>) {
              //   println!("Found matches at {} and {}", index_of_byte_to_compare, current_pos);
                 //set the offset of the found match
                 current_calculated_tuple.0 = current_pos - index_of_byte_to_compare;
+                println!("offset value of {} equals current pos value of {}", current_pos - current_calculated_tuple.0, current_pos);
                 //calculate and set the length of the match
                 let mut match_length: usize = 1;
                 // if the bytes following all equal each other and we don't accidentally run off of the edge of the vector, continue
                 //if current_pos + match_length < file_bytes.len() - 1  {
                     while current_pos + match_length < file_bytes.len() - 1 && file_bytes[current_pos + match_length] == file_bytes[index_of_byte_to_compare + match_length] {
+
                    //     println!("Found preceding matches at {} and {}", index_of_byte_to_compare + match_length, current_pos + match_length);
+
                          match_length += 1;
                     
                     }
@@ -101,6 +108,7 @@ fn compress_file(file: &Path, file_out_name: Option<&Path>) {
                 current_pos += match_length;
                 current_calculated_tuple.1 = match_length;
                 current_calculated_tuple.2 = file_bytes[current_pos];
+
                // println!("No more preceding matches found at index: {}, pushing tuple: {:?}", current_pos, current_calculated_tuple);
                 //resulting_file_vec.push(current_calculated_tuple);
                 
@@ -110,6 +118,8 @@ fn compress_file(file: &Path, file_out_name: Option<&Path>) {
             index_of_byte_to_compare += 1;
            // println!("No preceding matches found at index: {}, pushing tuple: {:?}", current_pos, current_calculated_tuple);
             //resulting_file_vec.push(current_calculated_tuple);
+
+
             }
             
         }
