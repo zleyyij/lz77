@@ -4,10 +4,12 @@ use std::env;
 //used to exit gracefully
 use std::process;
 //used for all the filesystem stuff
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::Path;
 
-
+//fixing cross compatability isssues
+use byteorder::{LittleEndian, WriteBytesExt};
 
 fn main() {
     //list of all the command line arguments
@@ -41,7 +43,6 @@ fn main() {
             //everything that isn't an argument
             _ => graceful_exit("Error: Unknown argument, see 'lz77 help' for details."),
         }
-
     } else {
         graceful_exit("Error: Please specify an argument, see 'lz77 help' for details.");
     }
@@ -60,9 +61,12 @@ fn graceful_exit(err: &str) {
 fn compress_file(file: &Path, file_out_name: Option<&Path>) {
     //get the contents of the file as a vector of bytes
     let file_bytes: Vec<u8> = fs::read(file).unwrap();
-
-    //print out file_bytes as a formatted(#) debug(?) statement
-   // println!("{:#?}", file_bytes);
+    //make this true to print out a detailed walkthrough of the compression steps
+    let debug_out: bool = false;
+    if debug_out {
+        //print out file_bytes as a debug(?) statement
+        println!("Original file as bytes: {:?}", file_bytes);
+    }
 
     //the resulting compressed vector
     //first item in tuple is the offset
@@ -71,97 +75,124 @@ fn compress_file(file: &Path, file_out_name: Option<&Path>) {
     let mut resulting_file_vec: Vec<(usize, usize, u8)> = vec![];
     //keep track of the current position
     let mut current_pos: usize = 0;
+    //size of sliding window in bytes
+    let sliding_window = 4000;
 
     //run until the end of the file
-    while current_pos < file_bytes.len() - 1{
+    while current_pos < file_bytes.len() - 1 {
+        if current_pos == file_bytes.len() / 100 {
+            println!("1% of the way through compression");
+        }
+        if current_pos == file_bytes.len() / 10 {
+            println!("10% of the way through compression");
+        }
+        if current_pos == file_bytes.len() / 2 {
+            println!("50% of the way through compression");
+        }
+
         //(0, 0, *) is the same as "no match found, here's the next byte"
         let mut current_calculated_tuple: (usize, usize, u8) = (0, 0, file_bytes[current_pos]);
 
         //special handling for the first byte because there's nothing before it to compare against
 
-
         //keep track of the current index byte being compared
         //it's probably far more storage efficient to work backwards from the current_pos
-        let mut index_of_byte_to_compare: usize = 0;
-        'sub_matches: while index_of_byte_to_compare < current_pos {
 
-            //see if we found a matching character
-           // println!("Comparing current index {} with compare char {}", index_of_byte_to_compare, current_pos);
+        //if the sliding window is less than the beginning of the file then start at the beginning of the file
+        let mut index_of_byte_to_compare: usize = if current_pos <= sliding_window {
+            0
+        } else {
+            current_pos - sliding_window
+        };
+
+        'sub_matches: while index_of_byte_to_compare < current_pos {
+            if debug_out {
+                //see if we found a matching character
+                println!(
+                    "Comparing current index {} with compare char {}",
+                    index_of_byte_to_compare, current_pos
+                );
+            }
             if file_bytes[index_of_byte_to_compare] == file_bytes[current_pos] {
-                
-             //   println!("Found matches at {} and {}", index_of_byte_to_compare, current_pos);
+                if debug_out {
+                    println!(
+                        "Found matches at {} and {}",
+                        index_of_byte_to_compare, current_pos
+                    );
+                }
                 //set the offset of the found match
                 current_calculated_tuple.0 = current_pos - index_of_byte_to_compare;
-                println!("offset value of {} equals current pos value of {}", current_pos - current_calculated_tuple.0, current_pos);
                 //calculate and set the length of the match
                 let mut match_length: usize = 1;
                 // if the bytes following all equal each other and we don't accidentally run off of the edge of the vector, continue
-                //if current_pos + match_length < file_bytes.len() - 1  {
-                    while current_pos + match_length < file_bytes.len() - 1 && file_bytes[current_pos + match_length] == file_bytes[index_of_byte_to_compare + match_length] {
-
-                   //     println!("Found preceding matches at {} and {}", index_of_byte_to_compare + match_length, current_pos + match_length);
-
-                         match_length += 1;
-                    
+                while current_pos + match_length < file_bytes.len() - 1
+                    && file_bytes[current_pos + match_length]
+                        == file_bytes[index_of_byte_to_compare + match_length]
+                {
+                    if debug_out {
+                        println!(
+                            "Found preceding matches at {} and {}",
+                            index_of_byte_to_compare + match_length,
+                            current_pos + match_length
+                        );
                     }
-                //}
+                    match_length += 1;
+                }
+
                 current_pos += match_length;
                 current_calculated_tuple.1 = match_length;
                 current_calculated_tuple.2 = file_bytes[current_pos];
-
-               // println!("No more preceding matches found at index: {}, pushing tuple: {:?}", current_pos, current_calculated_tuple);
-                //resulting_file_vec.push(current_calculated_tuple);
-                
+                if debug_out {
+                    println!(
+                        "No more preceding matches found at index: {}, pushing tuple: {:?}",
+                        current_pos, current_calculated_tuple
+                    );
+                }
                 break 'sub_matches;
-                
             } else {
-            index_of_byte_to_compare += 1;
-           // println!("No preceding matches found at index: {}, pushing tuple: {:?}", current_pos, current_calculated_tuple);
-            //resulting_file_vec.push(current_calculated_tuple);
-
-
+                index_of_byte_to_compare += 1;
+                if debug_out {
+                    println!(
+                        "No preceding matches found at index: {}, pushing tuple: {:?}",
+                        current_pos, current_calculated_tuple
+                    );
+                }
             }
-            
         }
+
         resulting_file_vec.push(current_calculated_tuple);
-        
+
         current_pos += 1;
         //FUNCTIONAL END
     }
+    println!("Finished compression.");
     //file storage is really nasty, you could probably score big boi points here by implementing this better
-   
-    let mut hex_values_string: String = String::new();
-    //convert to a massive honking string delimited by spaces
+
+    //trying to do it efficiently
+    //hahahaha this is laughably terrible
+    //it spits out files 2-3 times the size of the original file
+    let mut hex_values_vec: Vec<u16> = Vec::new();
+
     for i in resulting_file_vec {
-       
-        //this feels nasty but it's whatevs
-        //push each element as hex seperated by a space
-        hex_values_string.push_str(&format!("{:x} ", i.0));
-        
-        hex_values_string.push_str(&format!("{:x} ", i.1));
-
-        hex_values_string.push_str(&format!("{:x} ", i.2));
-        
-
-
-       // really_big_vec.push();
+        hex_values_vec.push(i.0.try_into().unwrap());
+        hex_values_vec.push(i.1.try_into().unwrap());
+        hex_values_vec.push(u16::from(i.2));
     }
-    println!("{}", hex_values_string);
-    
+    println!("Finished writing values to a vector, writing to storage");
+    //abuse deref coersion to convert the vec to a slice
+    let resulting_file_buf: &[u16] = &hex_values_vec;
+    // get resulting file name or set default
     let resulting_file_name = match file_out_name {
-        Some(name) => {
-            name
-        },
+        Some(name) => name,
         None => {
             //default filename defined here
             Path::new("out.compressed")
         }
-
     };
-    
-  
-    //get current byte in file_bytes
-    //compare it to every byte before it in file_bytes
-    //if equal, get the difference between the current position of the cursor and the position of the match
-    //compare the byte after the cursor to the byte after the match until a match is not found or the index of the byte being checked and the current position are the same
+    // write the file, one byte at a time
+    let mut resulting_file = File::create(resulting_file_name).expect("Unable to create file");
+    for &n in resulting_file_buf {
+        resulting_file.write_u16::<LittleEndian>(n).unwrap();
+    }
+    println!("File writing complete, exiting.");
 }
