@@ -6,4 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# used to handle reading the file as u16s while fixing compatability issues with endian-ness
 "byteorder" = "1.4.3"
+# used to parallelize stuff without any real work
+"rayon" = "1.6.1"
+"crossbeam-utils" = "0.8"
+# none of these are needed for compression
+"colored" = "2.0.0"
+# "crossterm" = "0.25"
