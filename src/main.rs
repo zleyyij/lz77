@@ -15,8 +15,6 @@ use std::path::Path;
 //fixing cross compatability isssues and finer FS control
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 //speedy
-use rayon::prelude::*;
-use std::thread;
 use crossbeam_utils::thread as crossbeam_thread;
 //used for debug printing and making everything pretty
 //not necessary for any actual work
@@ -35,7 +33,10 @@ fn main() {
         //rust equivalent of a switch statement
         match args[1].as_str() {
             "help" => {
-                println!("lz77 syntax:\n    lz77 help\nDisplay this message.\n    lz77 compress [file] [resulting_file]\nCompress [file], and write [resulting_file], defaults to out.compressed\nExample: 'lz77 compress cat.png cat.compressed'\n    lz77 decompress [file] [resulting_file]\nDecompress [file] and write [resulting_file]\nExample: 'lz77 decompress cat.compressed cat.png'");
+                println!("     {}\nDisplay this message.\n    {}\nCompress [file], and write [resulting_file], defaults to out.compressed\nExample: 'lz77 compress cat.png cat.compressed'\n    {}\nDecompress [file] and write [resulting_file]\nExample: 'lz77 decompress cat.compressed cat.png'", 
+                format!("lz77 help").bold().underline().green(),
+                format!("lz77 compress [file] [resulting_file]").bold().underline().green(),
+                format!("lz77 decompress [file] [resulting_file]").bold().underline().green());
             }
             "compress" => {
                 //make sure they specified a file to compress
@@ -86,6 +87,11 @@ fn graceful_exit(err: &str) {
     eprintln!("{}", err);
     process::exit(0);
 }
+
+//Explaination of the tuple nomenclature:
+//while the data is not of the tuple type, it describes a collection of 3 values in the current context
+//(also because I started out with an actual tuple and don't feel like going through and making every reference a better name)
+
 
 fn compress_file(
     file: &Path,
@@ -255,114 +261,20 @@ fn compress_file(
 fn decompress_file(file: &Path, resulting_file_name: Option<&Path>) -> Result<(), Box<dyn Error>> {
     //Read the file into a tuple of u16s
     let mut file_bytes: Vec<u16> = read_u16_vec_from_file(file)?;
-    //more speed gains to be made here
     let tuple_vec: Vec<Vec<u16>> = par_drain_to_tuple(&mut file_bytes)?;
-
-    //https://docs.rs/rayon/latest/rayon/fn.join.html
-
-   pub fn par_drain_to_tuple(v: &mut Vec<u16>) -> Result<Vec<Vec<u16>>, Box<dyn Error>> {
-        let mut return_vec: Vec<Vec<u16>> = Vec::with_capacity(v.len() / 3);
-        let v_len = v.len();
-        // let (lo, hi)  = v.split_at_mut(v_len / 2);
-        //println!("v_len: {}", v_len);
-        //println!("v_len / 4 = {}", (v_len - 1) / 4);
-        let num_of_threads = largest_factor_under_val(v_len / 3, 100);
-        println!("Using {} threads", num_of_threads);
-        let mut v_chunks =  v.chunks_exact(((v_len) / num_of_threads)).collect::<Vec<&[u16]>>();
-       // println!("last chunk: {:#x?}", v_chunks);
-        // if there's an uneven number of chunks, append to decompression
-        //println!("v_chunks len: {}", v_chunks.len());
-        // for i in v_chunks {
-        //     thread::spawn(move || drain_to_tuple(Vec::from(i)));
-        // }
-        //innermost vec should only be exactly 3, I would prefer a slice but don't want to spend time coercing types
-        //middle vec is the parsed chunk
-
-        let mut parsed_chunks: Vec<Vec<Vec<u16>>> = vec![Vec::from(Vec::with_capacity(3)); v_chunks.len()]; 
-            parsed_chunks = crossbeam_thread::scope (|s| {
-                let mut parsed_chunks = parsed_chunks.clone();
-                let mut handles: Vec<(usize, crossbeam_utils::thread::ScopedJoinHandle<std::vec::Vec<std::vec::Vec<u16>>>)> = Vec::new();
-                for (chunk_num, chunk) in v_chunks.iter().enumerate() {
-                    println!("Spawned thread to deal with chunk {} ", chunk_num);
-                    let handle = s.spawn(move |_| {
-                        drain_to_tuple(Vec::from(*chunk))
-                    });
-                    handles.push((chunk_num, handle));
-                }
-                // for chunk_num in  0..parsed_chunks.len() {
-                //   //  handles.set_position(chunk_num.try_into().unwrap());
-                //     parsed_chunks[chunk_num] = handles[chunk_num].join().unwrap();
-                // }
-                for handle in handles {
-                    parsed_chunks[handle.0] = handle.1.join().unwrap();
-
-                }
-                
-                parsed_chunks
-            }).unwrap();
-            for i in  parsed_chunks{
-                return_vec.extend(i);
-            }
-        
-        fn drain_to_tuple(v: Vec<u16>) -> Vec<Vec<u16>>{
-            let mut v = v.clone();
-            let mut new_tuple: Vec<Vec<u16>> = Vec::with_capacity(v.len()/3);
-            while v.len() > 0 {
-                println!("{}", v.len());
-                new_tuple.push(v.drain(0..3).collect::<Vec<u16>>());
-            }
-            new_tuple
-
-        }
-    
-        fn largest_factor_under_val(val: usize, limit: usize) -> usize{
-            //oneliner to solve for factors
-                let mut vec_of_factors = (1..val + 1).into_iter().filter(|&x| val % x == 0).collect::<Vec<usize>>();
-                //remove everything over the thread limit
-                vec_of_factors.retain(|item| { 
-                let remove_over_limit = {
-                    if item > &limit {
-                        false
-                    } else {
-                        true
-                    }
-
-                };
-                remove_over_limit
-            });
-            vec_of_factors.sort();
-            *vec_of_factors.last().clone().unwrap()
-
-        }
-        // let pieces = rayon::join(|| drain_to_tuple(&mut Vec::from(lo)), || drain_to_tuple(&mut Vec::from(hi)));
-        // return_vec.extend(pieces.0);
-        // return_vec.extend(pieces.1);
-        Ok(return_vec)
-    }
-
-
-    //let rayon_iter = file_bytes.par_iter();
-    // rayon_iter.drain(0..3).collect::<Vec<u16>>();
-    // while file_bytes.len() > 0 {
-    //     println!("{}", file_bytes.len());
-
-    //     tuple_vec.push(file_bytes.drain(0..3).collect::<Vec<u16>>());
-    // }
-
+    // the ending result before it gets written to a file
     let mut resulting_bytes: Vec<u16> = Vec::new();
     //position in the compressed data vec of tuples
-    //let mut current_pos = 0;
     for current_pos in 0..tuple_vec.len() {
         //offset from the the last uncompressed byte is tuple_vec[current_pos].0
         //match length is 1
         //next value is 2
-        let index_of_offset: usize =
-            resulting_bytes.len() - usize::from(tuple_vec[current_pos][0]);
+        let index_of_offset: usize = resulting_bytes.len() - usize::from(tuple_vec[current_pos][0]);
         resulting_bytes.extend_from_within(
             index_of_offset..(index_of_offset + usize::from(tuple_vec[current_pos][1])),
         );
         resulting_bytes.push(tuple_vec[current_pos][2]);
-       // println!("{} of {}", current_pos, tuple_vec.len());
+        // println!("{} of {}", current_pos, tuple_vec.len());
     }
     println!("Finished decompressing, writing to file.");
     let resulting_file = match resulting_file_name {
@@ -378,11 +290,90 @@ fn decompress_file(file: &Path, resulting_file_name: Option<&Path>) -> Result<()
     let mut resulting_file =
         BufWriter::new(File::create(resulting_file).expect("Unable to create file"));
     for n in resulting_bytes {
-        //u16
         resulting_file.write_u16::<BigEndian>(n)?;
-        //u8 tests
-        //resulting_file.write_u8(n).unwrap();
     }
+
+    pub fn par_drain_to_tuple(v: &mut Vec<u16>) -> Result<Vec<Vec<u16>>, Box<dyn Error>> {
+        let mut return_vec: Vec<Vec<u16>> = Vec::with_capacity(v.len() / 3);
+        // helps deal with ownership issues and race conditions with defining of mutable values
+        let v_len = v.len();
+        //it's more efficient to make sure each chunk has an amount of data to handle that devides evenly
+        let num_of_threads = largest_factor_under_val(v_len / 3, 100);
+
+        let v_chunks = v
+        //if num of threads was not calculated correctly this will panic
+            .chunks_exact(v_len / num_of_threads)
+            .collect::<Vec<&[u16]>>();
+        //this is a list of the pieces generated by each thread, initialized to be a guestimated length to reduce allocation calls
+        let mut parsed_chunks: Vec<Vec<Vec<u16>>> =
+            vec![Vec::from(Vec::with_capacity(3)); v_chunks.len()];
+        //by ensuring all access happens from a single scoped closure, it allows the ability to mutate memory in ways that would not normally be safe
+        parsed_chunks = crossbeam_thread::scope(|s| {
+            
+            let mut handles: Vec<(
+                //index of the chunk being processed
+                usize,
+                //handle to the thread doing the work
+                crossbeam_utils::thread::ScopedJoinHandle<std::vec::Vec<std::vec::Vec<u16>>>,
+            )> = Vec::new();
+            //make a list of return values and the index they belong in
+            for (chunk_num, chunk) in v_chunks.iter().enumerate() {
+                let handle = s.spawn(move |_| drain_to_tuple(Vec::from(*chunk)));
+                handles.push((chunk_num, handle));
+            }
+
+            //take the return value of each of the chunks and insert it in the correct location, puttin gall chunks into an ordered vec to be returned from the thread scope
+            for handle in handles {
+                parsed_chunks[handle.0] = handle.1.join().unwrap();
+            }
+            //return the fully decompressed value
+            parsed_chunks
+        })
+        .unwrap();
+        //take all the chunks returned from the thread scope and merge them into a single vec
+        for i in parsed_chunks {
+            return_vec.extend(i);
+        }
+
+        fn drain_to_tuple(v: Vec<u16>) -> Vec<Vec<u16>> {
+            //the second vec should only ever have exactly 3 items, but this allows us to pass the data from the function more easily
+            let mut new_tuple: Vec<Vec<u16>> = Vec::with_capacity(v.len() / 3);
+
+            let mut current_pos = 0;
+            while current_pos < v.len() {
+                new_tuple.push(v[current_pos..current_pos + 3].to_vec());
+                current_pos += 3
+            }
+
+            new_tuple
+        }
+
+        fn largest_factor_under_val(val: usize, limit: usize) -> usize {
+            //oneliner to solve for factors
+            let mut vec_of_factors = (1..val + 1)
+                .into_iter()
+                .filter(|&x| val % x == 0)
+                .collect::<Vec<usize>>();
+            //remove everything over the thread limit
+            vec_of_factors.retain(|item| {
+                let remove_over_limit = {
+                    if item > &limit {
+                        false
+                    } else {
+                        true
+                    }
+                };
+                remove_over_limit
+            });
+            //get the largest value in the vec by sorting
+            vec_of_factors.sort();
+            //if there are no values found, panic because it means the file doensn't follow the correct compression format
+            *vec_of_factors.last().clone().expect("Error: File does not appear to be compressed correctly")
+        }
+
+        Ok(return_vec)
+    }
+
     println!("File writing complete, exiting.");
     Ok(())
 }
@@ -399,18 +390,17 @@ pub fn read_u16_vec_from_file(file: &Path) -> Result<Vec<u16>, Box<dyn Error>> {
         match read_handle.read_u16::<BigEndian>() {
             Ok(bytes) => {
                 file_bytes.push(bytes);
-                //println!("{:#x}", bytes)
             }
-            Err(err) => {
-                println!("Encountered uneven bytes: {}", err);
+            Err(_) => {
+                //println!("Encountered uneven bytes: {}", err);
                 //assume we've reached the end of the file and so we put a 0 bit
                 //will probably break something
-                //file footer should be added at some point
                 //see this wizardry for context
                 //https://stackoverflow.com/questions/50243866/how-do-i-convert-two-u8-primitives-into-a-u16-primitive
                 let last_byte = read_handle.get_ref().last().unwrap();
                 let byte_to_push = ((*last_byte as u16) << 8) | 0 as u16;
                 file_bytes.push(byte_to_push);
+                //move the cursor forwards one to the EOF
                 read_handle.seek(SeekFrom::Current(1))?;
             }
         }
