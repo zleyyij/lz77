@@ -1,3 +1,5 @@
+# Archived
+This repository will not see further updates, and is no longer representative of my programming style or ability.
 # lz77
 implementation of the lz77 compression algorithm in rust
 
